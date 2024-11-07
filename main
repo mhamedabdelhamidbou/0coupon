@@ -1,0 +1,132 @@
+import streamlit as st
+import numpy as np
+import plotly.graph_objs as go
+import matplotlib.pyplot as plt
+
+# Setting up the page configuration
+st.set_page_config(layout="wide")
+
+# Function for calculating the exact bond price using Vasicek model
+def vasicek_exact_price(a, b, sigma, r0, T):
+    A_T = (1 - np.exp(-a * T)) / a
+    B_T = (1 - np.exp(-a * T)) / a
+    return np.exp(-r0 * A_T - b * B_T)
+
+# Function for bond price calculation using Monte Carlo simulations
+def vasicek_monte_carlo(a, b, sigma, r0, T, N, dt):
+    num_steps = int(T / dt)
+    rates = np.zeros((N, num_steps + 1))
+    rates[:, 0] = r0
+
+    # Loop for Monte Carlo simulations to model the interest rate paths
+    for t in range(1, num_steps + 1):
+        dW = np.sqrt(dt) * np.random.randn(N)
+        rates[:, t] = rates[:, t - 1] + a * (b - rates[:, t - 1]) * dt + sigma * dW
+
+    bond_prices = np.exp(-np.sum(rates[:, 1:] * dt, axis=1))
+    bond_price_mean = np.mean(bond_prices)
+    bond_price_std = np.std(bond_prices)
+    return bond_price_mean, bond_price_std, rates
+
+# Function to plot interest rate trajectories
+def plot_interest_rate_trajectories(rates, T, dt, num_paths_to_plot):
+    time_points = np.linspace(0, T, int(T / dt) + 1)
+    fig = go.Figure()
+
+    # Plot the specified number of interest rate paths
+    for i in range(num_paths_to_plot):
+        fig.add_trace(
+            go.Scatter(x=time_points, y=rates[i, :], mode='lines', line=dict(width=1), name=f"Trajectory {i + 1}")
+        )
+
+    fig.update_layout(
+        title="Simulated Interest Rate Trajectories",
+        xaxis_title="Time (Years)",
+        yaxis_title="Interest Rate",
+        showlegend=False
+    )
+    return fig
+
+# Function to plot bond price distribution
+def plot_bond_price_distribution(bond_prices):
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.hist(bond_prices, bins=30, color='skyblue', edgecolor='black')
+    ax.set_title("Distribution of Simulated Bond Prices")
+    ax.set_xlabel("Bond Price")
+    ax.set_ylabel("Frequency")
+    st.pyplot(fig)
+
+# Function to calculate Value at Risk (VaR)
+def calculate_var(bond_prices, confidence_level=0.95):
+    var = np.percentile(bond_prices, (1 - confidence_level) * 100)
+    return var
+
+# Function to plot the histogram with VaR
+def plot_var_distribution(bond_prices, var):
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.hist(bond_prices, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
+    ax.axvline(x=var, color='red', linestyle='--', linewidth=2, label=f'VaR at {var:.4f}')
+    ax.set_title("Distribution of Simulated Bond Prices with VaR")
+    ax.set_xlabel("Bond Price")
+    ax.set_ylabel("Frequency")
+    ax.legend()
+    st.pyplot(fig)
+
+# Main function to drive the Streamlit application
+def main():
+    st.title("Zero-Coupon Bond Valuation with Vasicek Model and Monte Carlo Simulation")
+
+    # Input fields for model parameters
+    a = st.number_input("Mean Reversion Speed (a)", min_value=0.01, value=0.1, step=0.01)
+    b = st.number_input("Long-Term Average Interest Rate (b)", min_value=0.0, value=0.05, step=0.01)
+    sigma = st.number_input("Interest Rate Volatility (sigma)", min_value=0.01, value=0.02, step=0.01)
+    r0 = st.number_input("Initial Interest Rate (r0)", min_value=0.0, value=0.03, step=0.01)
+    T = st.number_input("Bond Maturity (T) in Years", min_value=0.1, value=1.0, step=0.1)
+    N = st.number_input("Number of Monte Carlo Simulations (N)", min_value=100, value=1000, step=100)
+    dt = st.number_input("Time Step (dt)", min_value=0.001, value=0.01, step=0.001)
+    confidence_level = st.slider("Confidence Level for VaR", min_value=0.8, max_value=0.99, value=0.95, step=0.01)
+
+    # Calculate the exact bond price
+    exact_price = vasicek_exact_price(a, b, sigma, r0, T)
+
+    # Display a progress spinner while computing Monte Carlo simulations
+    with st.spinner('Calculating Monte Carlo prices...'):
+        mc_price, mc_price_std, rates = vasicek_monte_carlo(a, b, sigma, r0, T, N, dt)
+
+    # Displaying results
+    st.write(f"### Exact Zero-Coupon Bond Price: {exact_price:.4f}")
+    st.write(f"### Estimated Price by Monte Carlo: {mc_price:.4f}")
+    st.write(f"### Standard Deviation of Monte Carlo Prices: {mc_price_std:.4f}")
+
+    # Calculate and display Value at Risk (VaR)
+    bond_prices = np.exp(-np.sum(rates[:, 1:] * dt, axis=1))
+    var = calculate_var(bond_prices, confidence_level)
+    st.write(f"### Value at Risk (VaR) at {confidence_level * 100:.2f}% Confidence Level: {var:.4f}")
+
+    # Plot the interest rate trajectories
+    st.write("### Simulated Interest Rate Trajectories")
+    num_paths_to_plot = min(100, N)  # Limit number of paths for visualization
+    fig = plot_interest_rate_trajectories(rates, T, dt, num_paths_to_plot)
+    st.plotly_chart(fig)
+
+    # Plot the bond price distribution
+    st.write("### Distribution of Simulated Bond Prices")
+    plot_bond_price_distribution(bond_prices)
+
+    # Plot the bond price distribution with VaR
+    st.write("### Distribution of Simulated Bond Prices with Value at Risk (VaR)")
+    plot_var_distribution(bond_prices, var)
+
+    # Adding a summary
+    st.write("""
+    ### Summary
+    - The **exact price** is calculated using the Vasicek model, accounting for the mean reversion speed, long-term average rate, and interest rate volatility.
+    - The **Monte Carlo method** estimates the bond price using numerous simulations, considering the stochastic dynamics of interest rates.
+    - The **interest rate trajectories** illustrate how rates evolve over time, showing behavior akin to real-world financial markets.
+    - The **bond price distribution** offers insights into the range of possible bond values based on the simulated paths.
+    - The **Value at Risk (VaR)** provides a measure of the potential loss at a given confidence level, helping to assess the risk of holding the bond.
+    """)
+
+# Entry point for the Streamlit application
+if __name__ == "__main__":
+    main()
